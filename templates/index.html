@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Upload</title>
+    <style>
+        #upload-button, #pause-button, #resume-button, #cancel-button {
+            margin: 10px;
+        }
+        #progress {
+            font-size: 18px;
+            font-weight: bold;
+            margin: 10px;
+        }
+    </style>
+</head>
+<body>
+    <form id="uploadForm" enctype="multipart/form-data">
+        <input type="file" id="file" name="file">
+        <label>
+            <input type="checkbox" id="compress" name="compress"> Compresser la vidéo
+        </label>
+        <div>
+            <label>Résolutions:</label><br>
+            <label><input type="checkbox" name="resolutions" value="SD"> SD</label><br>
+            <label><input type="checkbox" name="resolutions" value="MD"> MD</label><br>
+            <label><input type="checkbox" name="resolutions" value="720"> 720p</label><br>
+            <label><input type="checkbox" name="resolutions" value="1080"> 1080p</label><br>
+        </div>
+        <button type="button" id="upload-button" onclick="upload()">Upload</button>
+        <button type="button" id="pause-button" onclick="pauseUpload()">Pause Upload</button>
+        <button type="button" id="resume-button" onclick="resumeUpload()">Resume Upload</button>
+        <button type="button" id="cancel-button" onclick="cancelUpload()">Cancel Upload</button>
+        <div id="progress"></div>
+    </form>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.0/socket.io.js"></script>
+    <script>
+        const socket = io();
+        let uploadedChunks = 0;
+        let totalChunks = 0;
+        let uploadPaused = false;
+        let uploadCancelled = false;
+
+        function upload() {
+            const fileInput = document.getElementById('file');
+            const compress = document.getElementById('compress').checked;
+            const resolutions = Array.from(document.querySelectorAll('input[name="resolutions"]:checked')).map(el => el.value);
+
+            if (fileInput.files.length === 0) {
+                alert('Please select a file');
+                return;
+            }
+
+            const file = fileInput.files[0];
+            const chunkSize = 1024 * 1024; // 1 MB
+            totalChunks = Math.ceil(file.size / chunkSize);
+
+            document.getElementById('upload-button').disabled = true;
+            document.getElementById('pause-button').disabled = false;
+            document.getElementById('resume-button').disabled = true;
+            document.getElementById('cancel-button').disabled = false;
+
+            for (let i = 0; i < totalChunks; i++) {
+                const chunk = file.slice(i * chunkSize, (i + 1) * chunkSize);
+                const reader = new FileReader();
+
+                reader.onload = (e) => {
+                    if (!uploadPaused &&!uploadCancelled) {
+                        socket.emit('upload_chunk', {
+                            data: e.target.result,
+                            filename: file.name,
+                            chunkNumber: i,
+                            totalChunks: totalChunks,
+                            compress: compress,
+                            resolutions: resolutions,
+                            file_id:'ulid'
+                        });
+                        uploadedChunks++;
+                        const progress = (uploadedChunks / totalChunks) * 100;
+                        document.getElementById('progress').innerHTML = `Uploaded ${progress.toFixed(2)}%`;
+                    }
+                };
+                reader.readAsArrayBuffer(chunk);
+            }
+        }
+
+        function pauseUpload() {
+            uploadPaused = true;
+            document.getElementById('pause-button').disabled = true;
+            document.getElementById('resume-button').disabled = false;
+            document.getElementById('progress').innerHTML += 'Paused)';
+        }
+
+        function resumeUpload() {
+            uploadPaused = false;
+            document.getElementById('pause-button').disabled = false;
+            document.getElementById('resume-button').disabled = true;
+            document.getElementById('progress').innerHTML = `Uploaded ${uploadedChunks} of ${totalChunks} chunks`;
+        }
+
+        function cancelUpload() {
+            uploadCancelled = true;
+            document.getElementById('cancel-button').disabled = true;
+            document.getElementById('progress').innerHTML = 'Upload cancelled';
+            socket.emit('cancel_upload');
+        }
+
+        socket.on('response', (data) => {
+    console.log(data);
+    if (data.status === 'completed') {
+        document.getElementById('upload-button').disabled = false;
+        document.getElementById('pause-button').disabled = true;
+        document.getElementById('resume-button').disabled = true;
+        document.getElementById('cancel-button').disabled = true;
+        document.getElementById('progress').innerHTML = 'Upload completed!';
+    }
+});
+    </script>
+</body>
+</html>
